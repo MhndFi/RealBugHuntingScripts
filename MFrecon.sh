@@ -66,11 +66,16 @@ What it does:
   6) Writes AI handoff file: NEXT_STEPS_AI.md
 
 Output:
-  Creates: ~/targets/<domain>/
-  Key folders: subs, alive, urls, js, nuclei_results, burp-to
+  Default:
+    ~/targets/<domain>/
+  Custom:
+    -o, --output-dir /path/to/folder
+  Key folders:
+    subs, alive, urls, js, nuclei_results, burp-to
 
 Options:
   -h, --help                          Show this help message.
+  -o, --output-dir <path>             Write all recon output into this exact folder.
   --js-mode <important|all>           JS download mode. Default: important.
   --max-js-per-host <n>               Cap selected JS URLs per host in important mode. Default: 30.
   --skip-js-download                  Skip wget JS download stage but still create NEXT_STEPS_AI.md.
@@ -78,11 +83,22 @@ Options:
   --wayback-script-timeout <sec>      Timeout for wayback.sh stages. Default: 180.
   --gau-timeout <sec>                 Timeout for gau URL collection. Default: 180.
   --katana-timeout <sec>              Timeout for katana URL collection. Default: 300.
-  Note: these options can also be set as env vars with the same names.
+
+Environment variables:
+  OUTPUT_DIR
+  JS_DOWNLOAD_MODE
+  MAX_JS_PER_HOST
+  SKIP_JS_DOWNLOAD
+  WAYBACK_CDX_TIMEOUT
+  WAYBACK_SCRIPT_TIMEOUT
+  GAU_TIMEOUT
+  KATANA_TIMEOUT
 
 Examples:
   MFrecon.sh example.com
   MFrecon.sh https://example.com
+  MFrecon.sh -o ~/recon/vfsevisa vfsevisa.com
+  OUTPUT_DIR=~/recon/vfsevisa MFrecon.sh vfsevisa.com
   MFrecon.sh --js-mode all vfsevisa.com
   MFrecon.sh --max-js-per-host 15 vfsevisa.com
   MFrecon.sh --skip-js-download vfsevisa.com
@@ -90,7 +106,35 @@ Examples:
 USAGE
 }
 
+# Path helpers.
+START_PWD="$(pwd)"
+
+expand_path() {
+  local path="$1"
+  case "$path" in
+    "~")
+      printf '%s\n' "$HOME"
+      ;;
+    "~/"*)
+      printf '%s/%s\n' "$HOME" "${path#~/}"
+      ;;
+    *)
+      printf '%s\n' "$path"
+      ;;
+  esac
+}
+
+make_absolute_path() {
+  local path="$1"
+  if [[ "$path" == /* ]]; then
+    printf '%s\n' "$path"
+  else
+    printf '%s/%s\n' "$START_PWD" "$path"
+  fi
+}
+
 # Runtime config defaults. Can be overridden by CLI options below.
+OUTPUT_DIR="${OUTPUT_DIR:-}"
 JS_DOWNLOAD_MODE="${JS_DOWNLOAD_MODE:-important}"
 MAX_JS_PER_HOST="${MAX_JS_PER_HOST:-30}"
 SKIP_JS_DOWNLOAD="${SKIP_JS_DOWNLOAD:-0}"
@@ -105,6 +149,15 @@ while [[ $# -gt 0 ]]; do
     -h|--help)
       usage
       exit 0
+      ;;
+    -o|--output-dir)
+      if [[ $# -lt 2 ]]; then
+        echo "[!] Missing value for --output-dir" >&2
+        usage
+        exit 1
+      fi
+      OUTPUT_DIR="$2"
+      shift 2
       ;;
     --js-mode)
       if [[ $# -lt 2 ]]; then
@@ -290,8 +343,19 @@ if [[ ! -x "${WAYBACK_SCRIPT}" ]]; then
   exit 1
 fi
 
-TARGET_ROOT="${HOME}/targets/${DOMAIN}"
-MAIN_TARGET_DIR_NAME="$(basename "${TARGET_ROOT}")"
+if [[ -n "${OUTPUT_DIR}" ]]; then
+  TARGET_ROOT="$(expand_path "${OUTPUT_DIR}")"
+  TARGET_ROOT="$(make_absolute_path "${TARGET_ROOT}")"
+  if [[ "${TARGET_ROOT}" != "/" ]]; then
+    TARGET_ROOT="${TARGET_ROOT%/}"
+  fi
+  if [[ -z "${TARGET_ROOT}" ]]; then
+    echo "[!] Invalid --output-dir value: ${OUTPUT_DIR}" >&2
+    exit 1
+  fi
+else
+  TARGET_ROOT="${HOME}/targets/${DOMAIN}"
+fi
 
 echo "${GREEN}[i]${RESET} Preflight OK: all required tools are installed."
 echo "${GREEN}[i]${RESET} Target input: ${DOMAIN_INPUT}"
@@ -306,6 +370,7 @@ step() {
 step "Create target directory: ${TARGET_ROOT}"
 mkdir -p "${TARGET_ROOT}"
 cd "${TARGET_ROOT}"
+TARGET_ROOT="$(pwd -P)"
 
 step "Create folder structure"
 mkdir -p subs urls alive nuclei_results js js/Output burp-to
@@ -549,7 +614,7 @@ else
 fi
 
 step "Write AI handoff guide"
-cat > "${TARGET_ROOT}/NEXT_STEPS_AI.md" <<EOF2
+cat > "NEXT_STEPS_AI.md" <<EOF2
 Use the prompts below with AI after this recon finishes (up to the wget step).
 
 Prompt 1:
@@ -610,7 +675,7 @@ For each high-value endpoint or JS-discovered function, provide:
 - why it is suspicious
 - specific manual tests to try for IDOR, auth bypass, workflow bypass, reschedule tampering, photo tampering, payment tampering, or hidden admin access
 
-make it in file ~/targets/${MAIN_TARGET_DIR_NAME}/burp-to/burp_manual_testing_shortlist.csv
+make it in file ${TARGET_ROOT}/burp-to/burp_manual_testing_shortlist.csv
 
 Prompt 3:
 make me endpoints from this file burp-to/burp_manual_testing_shortlist.csv on those hosts tp test on burp I want like a request copy past
@@ -618,7 +683,7 @@ Start with these hosts first (highest value from the JS analysis):
 
 ---THE HOSTS HERE
 
-make it in this new folder ~/targets/${MAIN_TARGET_DIR_NAME}/burp-to
+make it in this new folder ${TARGET_ROOT}/burp-to
 EOF2
 
 step "Download JavaScript files"
