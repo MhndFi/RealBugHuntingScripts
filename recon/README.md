@@ -20,7 +20,7 @@ to drive your manual testing in Burp.
 
 ```zsh
 git clone https://github.com/MhndFi/RealBugHuntingScripts.git
-cd RealBugHuntingScripts/scan
+cd RealBugHuntingScripts/recon
 chmod +x setup-toolchain.sh MFrecon.sh
 ./setup-toolchain.sh
 ```
